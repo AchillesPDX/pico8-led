@@ -1,0 +1,15 @@
+[Unit]
+Description=pico8-led Spotify overlay (clock/title/artist/progress)
+After=picom.service now-playing-fancy.service
+Requires=picom.service
+
+[Service]
+Type=simple
+User=jared
+Environment=DISPLAY=:3.0
+ExecStart=/usr/bin/python3 /home/jared/pico8-led/overlay_display.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

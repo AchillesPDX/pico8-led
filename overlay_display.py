@@ -25,12 +25,14 @@ import json
 import os
 import time
 import signal
+import subprocess
 
 from Xlib import X, display
 from PIL import Image, ImageDraw, ImageFont
 
 DISPLAY_NAME = ":3.0"
 GEOMETRY = (128, 128, 128, 128)  # width, height, x, y - match feh's geometry
+PICO_WINDOW_TITLE = "PICO-8"
 
 STATE_DIR = "/var/lib/pico8-led"
 TRACK_STATE_PATH = os.path.join(STATE_DIR, "track_state.json")
@@ -168,17 +170,48 @@ def blit(window, gc, img, width, height, depth):
     window.put_image(gc, 0, 0, width, height, X.ZPixmap, depth, 0, data)
 
 
+def pico8_is_visible():
+    """Same technique toggle_display.sh already uses - no shared state
+    file, just ask X directly whether the PICO-8 window is mapped."""
+    try:
+        win_id = subprocess.run(
+            ["xdotool", "search", "--name", PICO_WINDOW_TITLE],
+            capture_output=True, text=True, timeout=2,
+        ).stdout.strip().split("\n")[0]
+        if not win_id:
+            return False
+        result = subprocess.run(
+            ["xwininfo", "-id", win_id],
+            capture_output=True, text=True, timeout=2,
+        ).stdout
+        return "IsViewable" in result
+    except Exception:
+        # if we can't tell, err on the side of NOT covering gameplay
+        return True
+
+
 def main():
     disp = display.Display(DISPLAY_NAME)
     window, depth = make_window(disp)
     gc = window.create_gc()
 
     width, height = GEOMETRY[0], GEOMETRY[1]
+    currently_mapped = True
 
     while _running:
-        frame = render_frame(width, height)
-        blit(window, gc, frame, width, height, depth)
-        disp.sync()
+        if pico8_is_visible():
+            if currently_mapped:
+                window.unmap()
+                disp.sync()
+                currently_mapped = False
+        else:
+            if not currently_mapped:
+                window.map()
+                disp.sync()
+                currently_mapped = True
+            frame = render_frame(width, height)
+            blit(window, gc, frame, width, height, depth)
+            disp.sync()
         time.sleep(REDRAW_INTERVAL)
 
     window.unmap()

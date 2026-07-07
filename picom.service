@@ -1,0 +1,17 @@
+[Unit]
+Description=picom compositor for pico8-led overlay transparency
+# IMPORTANT: add your Xvfb/X-server unit here too, e.g. "After=xvfb.service"
+# or whatever pico8-led's own service is called that brings up DISPLAY :3.0 -
+# picom will fail to start if it runs before the X server exists.
+After=network-online.target
+
+[Service]
+Type=simple
+User=jared
+Environment=DISPLAY=:3.0
+ExecStart=/usr/bin/picom --config /home/jared/pico8-led/picom.conf
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
