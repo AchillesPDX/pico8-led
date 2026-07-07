@@ -1,0 +1,14 @@
+[Unit]
+Description=Spotify Now Playing poller for LED matrix
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jared
+ExecStart=/usr/bin/python3 /home/jared/pico8-led/now_playing.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

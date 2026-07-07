@@ -1,2 +1,25 @@
 /*.o
 /xserver-screen
+
+# PICO-8 is commercial software - never commit/redistribute the binary
+pico-8_*.zip
+
+# backups from manual edits, not source
+*.bak
+
+# generated album art / render state - not source
+nowplaying.png
+nowplaying_fancy.png
+nowplaying*.png.tmp
+
+# runtime state, regenerated on boot
+pico8-led-render-mode
+
+# python
+__pycache__/
+*.pyc
+
+# secrets live outside this repo entirely (~/.config/pico8-led/) but
+# belt-and-suspenders in case that ever changes
+spotify.json
+*token_cache*
