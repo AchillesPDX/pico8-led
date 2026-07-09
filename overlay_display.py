@@ -128,8 +128,8 @@ def render_frame(width, height):
 
     if overlay.get("clock"):
         text = time.strftime("%H:%M")
-        draw.rectangle([0, 0, width, 14], fill=BAR_BG)
-        draw.text((3, 1), text, font=font_small, fill=(255, 255, 255, 255))
+        draw.rectangle([0, 0, width, 11], fill=BAR_BG)
+        draw.text((2, -1), text, font=font_small, fill=(255, 255, 255, 255))
 
     if track.get("is_playing"):
         # extrapolate progress locally so it ticks smoothly between polls
@@ -140,7 +140,7 @@ def render_frame(width, height):
         frac = progress_ms / duration_ms
 
         progress_enabled = overlay.get("progress")
-        PROGRESS_BAR_HEIGHT = 3
+        PROGRESS_BAR_HEIGHT = 2
         bottom_reserved = PROGRESS_BAR_HEIGHT if progress_enabled else 0
 
         if overlay.get("title") or overlay.get("artist"):
@@ -150,10 +150,12 @@ def render_frame(width, height):
             if overlay.get("artist") and track.get("artist"):
                 lines.append(track["artist"])
 
-            bar_h = 12 * len(lines) + 4
+            bar_h = 12 * len(lines) + 2
+            if len(lines) > 1:
+                bar_h -= 5
             bar_bottom = height - bottom_reserved
             draw.rectangle([0, bar_bottom - bar_h, width, bar_bottom], fill=BAR_BG)
-            ty = bar_bottom - bar_h + 2
+            ty = bar_bottom - bar_h + 1
             for i, line in enumerate(lines):
                 f = font_small if i == 0 else font_tiny
                 # crude truncate rather than scroll, for a first pass
@@ -161,7 +163,7 @@ def render_frame(width, height):
                     while line and f.getlength(line + "...") > width - 6:
                         line = line[:-1]
                     line += "..."
-                draw.text((3, ty), line, font=f, fill=(255, 255, 255, 255))
+                draw.text((2, ty), line, font=f, fill=(255, 255, 255, 255))
                 ty += 12
 
         if progress_enabled:
