@@ -128,7 +128,8 @@ def render_frame(width, height):
 
     if overlay.get("clock"):
         text = time.strftime("%H:%M")
-        draw.rectangle([0, 0, width, 11], fill=BAR_BG)
+        """draw.rectangle([0, 0, width, 11], fill=BAR_BG)"""
+        draw.text((3, 0), text, font=font_small, fill=(0, 0, 0, 255))
         draw.text((2, -1), text, font=font_small, fill=(255, 255, 255, 255))
 
     if track.get("is_playing"):
