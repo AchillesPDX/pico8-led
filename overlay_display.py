@@ -125,12 +125,13 @@ def render_frame(width, height):
         font_tiny = font_small
 
     BAR_BG = (0, 0, 0, 140)  # translucent black backing, alpha 140/255
+    STROKECOLOR = (0, 0, 0, 140) # translucent black stroke, alpha 140/255
+    TEXTCOLOR = (255, 255, 255, 255) # Text color
 
     if overlay.get("clock"):
-        text = time.strftime("%H:%M")
-        """draw.rectangle([0, 0, width, 11], fill=BAR_BG)"""
-        draw.text((3, 0), text, font=font_small, fill=(0, 0, 0, 255))
-        draw.text((2, -1), text, font=font_small, fill=(255, 255, 255, 255))
+        text = time.strftime("%I:%M").lstrip("0").lower()
+        draw.text((width - 2, 0), text, font=font_small, fill=(TEXTCOLOR),
+                   stroke_width=1, stroke_fill=(STROKECOLOR), anchor="ra")
 
     if track.get("is_playing"):
         # extrapolate progress locally so it ticks smoothly between polls
@@ -155,7 +156,7 @@ def render_frame(width, height):
             if len(lines) > 1:
                 bar_h -= 5
             bar_bottom = height - bottom_reserved
-            draw.rectangle([0, bar_bottom - bar_h, width, bar_bottom], fill=BAR_BG)
+            """draw.rectangle([0, bar_bottom - bar_h, width, bar_bottom], fill=BAR_BG)"""
             ty = bar_bottom - bar_h + 1
             for i, line in enumerate(lines):
                 f = font_small if i == 0 else font_tiny
@@ -164,7 +165,8 @@ def render_frame(width, height):
                     while line and f.getlength(line + "...") > width - 6:
                         line = line[:-1]
                     line += "..."
-                draw.text((2, ty), line, font=f, fill=(255, 255, 255, 255))
+                draw.text((2, ty), line, font=f, fill=(TEXTCOLOR),
+                           stroke_width=1, stroke_fill=(STROKECOLOR))
                 ty += 12
 
         if progress_enabled:
