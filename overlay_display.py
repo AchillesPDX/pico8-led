@@ -139,6 +139,10 @@ def render_frame(width, height):
         progress_ms = min(progress_ms, duration_ms)
         frac = progress_ms / duration_ms
 
+        progress_enabled = overlay.get("progress")
+        PROGRESS_BAR_HEIGHT = 3
+        bottom_reserved = PROGRESS_BAR_HEIGHT if progress_enabled else 0
+
         if overlay.get("title") or overlay.get("artist"):
             lines = []
             if overlay.get("title") and track.get("title"):
@@ -147,8 +151,9 @@ def render_frame(width, height):
                 lines.append(track["artist"])
 
             bar_h = 12 * len(lines) + 4
-            draw.rectangle([0, height - bar_h, width, height], fill=BAR_BG)
-            ty = height - bar_h + 2
+            bar_bottom = height - bottom_reserved
+            draw.rectangle([0, bar_bottom - bar_h, width, bar_bottom], fill=BAR_BG)
+            ty = bar_bottom - bar_h + 2
             for i, line in enumerate(lines):
                 f = font_small if i == 0 else font_tiny
                 # crude truncate rather than scroll, for a first pass
@@ -159,8 +164,8 @@ def render_frame(width, height):
                 draw.text((3, ty), line, font=f, fill=(255, 255, 255, 255))
                 ty += 12
 
-        if overlay.get("progress"):
-            bar_y = height - 3
+        if progress_enabled:
+            bar_y = height - PROGRESS_BAR_HEIGHT
             draw.rectangle([0, bar_y, width, height], fill=(255, 255, 255, 60))
             draw.rectangle([0, bar_y, int(width * frac), height],
                             fill=(30, 215, 96, 220))  # spotify green-ish
