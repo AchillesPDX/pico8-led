@@ -53,9 +53,9 @@
 // find the right numbers, then edit these three lines).
 // Defaults below match a lot of common SNES-style USB pads:
 // 0=B 1=A 2=Y 3=X 4=L 5=R 6=Select 7=Start
-#define BTN_MODIFIER 10   // hold this...
-#define BTN_DIMMER   6   // ...and press this to dim
-#define BTN_BRIGHTER 7   // ...and press this to brighten
+#define BTN_MODIFIER 6   // hold this...
+#define BTN_DIMMER   4   // ...and press this to dim
+#define BTN_BRIGHTER 5   // ...and press this to brighten
 
 // Held together with BTN_MODIFIER, this flips the display between PICO-8
 // and the Spotify album-art viewer, including restarting the renderer
@@ -64,7 +64,7 @@
 // Different action button, same modifier, so it's a separate combo from
 // the brightness one above. Run `jstest /dev/input/js0` to find the
 // right number for your pad.
-#define BTN_MODE_TOGGLE 11   // e.g. Start
+#define BTN_MODE_TOGGLE 7   // e.g. Start
 
 // Runs in the working directory xserver-screen was launched from.
 // Backgrounded and logged to a temp file so a slow xdotool call never
