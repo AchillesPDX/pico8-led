@@ -34,6 +34,13 @@ DISPLAY_NAME = ":3.0"
 GEOMETRY = (128, 128, 128, 128)  # width, height, x, y - match feh's geometry
 PICO_WINDOW_TITLE = "PICO-8"
 
+# Resolved relative to this script's own location, not the current
+# working directory - systemd's default WorkingDirectory is "/" unless
+# explicitly set, so a bare "./fonts/..." would silently fail and fall
+# back to the default font with no error.
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+FONTS_DIR = os.path.join(SCRIPT_DIR, "fonts")
+
 STATE_DIR = "/var/lib/pico8-led"
 TRACK_STATE_PATH = os.path.join(STATE_DIR, "track_state.json")
 OVERLAY_STATE_PATH = os.path.join(STATE_DIR, "overlay_state.json")
@@ -109,10 +116,11 @@ def render_frame(width, height):
 
     try:
         font_small = ImageFont.truetype(
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 11)
+            os.path.join(FONTS_DIR, "04b_25.ttf"), 12)
         font_tiny = ImageFont.truetype(
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 9)
-    except Exception:
+            os.path.join(FONTS_DIR, "04b_03.ttf"), 8)
+    except Exception as e:
+        print(f"overlay_display: could not load custom font, falling back to default: {e}")
         font_small = ImageFont.load_default()
         font_tiny = font_small
 
