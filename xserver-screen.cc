@@ -13,6 +13,7 @@
 #include <X11/Xutil.h>
 
 #include <linux/joystick.h>
+#include <sys/wait.h>
 
 #include <string>
 #include <vector>
@@ -65,6 +66,20 @@
 // the brightness one above. Run `jstest /dev/input/js0` to find the
 // right number for your pad.
 #define BTN_MODE_TOGGLE 7   // e.g. Start
+
+// Face buttons - fire only while in Spotify mode, since these same
+// buttons are PICO-8's primary gameplay buttons. Gated at runtime by
+// IsSpotifyModeActive() below so mashing these during gameplay doesn't
+// spuriously flip overlay flags in the background.
+#define BTN_OVERLAY_CLOCK    0  // South
+#define BTN_OVERLAY_TITLE    1  // East
+#define BTN_OVERLAY_ARTIST   2  // West
+#define BTN_OVERLAY_PROGRESS 3  // North
+
+#define OVERLAY_TOGGLE_CLOCK_COMMAND    "python3 ./overlay_toggle.py clock >/tmp/pico8-led-overlay-toggle.log 2>&1 &"
+#define OVERLAY_TOGGLE_TITLE_COMMAND    "python3 ./overlay_toggle.py title >/tmp/pico8-led-overlay-toggle.log 2>&1 &"
+#define OVERLAY_TOGGLE_ARTIST_COMMAND   "python3 ./overlay_toggle.py artist >/tmp/pico8-led-overlay-toggle.log 2>&1 &"
+#define OVERLAY_TOGGLE_PROGRESS_COMMAND "python3 ./overlay_toggle.py progress >/tmp/pico8-led-overlay-toggle.log 2>&1 &"
 
 // Runs in the working directory xserver-screen was launched from.
 // Backgrounded and logged to a temp file so a slow xdotool call never
@@ -205,6 +220,30 @@ static void CloseJoystick(const char *reason)
     }
 }
 
+// Mirrors run_led.sh's detect_mode() function exactly (same underlying
+// signal: is PICO-8's window currently visible) - just queried from C++
+// on a button-press edge instead of shell on a respawn. Shelling out
+// here rather than walking the X window tree directly via Xlib, since
+// this only runs on discrete button presses (not every frame) and this
+// way it's guaranteed to agree with the shell-side detection everywhere
+// else in the project, rather than risking two subtly different
+// implementations of "is PICO-8 visible" drifting apart over time.
+static bool IsSpotifyModeActive()
+{
+    int status = system(
+        "xdotool search --name \"PICO-8\" 2>/dev/null | head -n1 | "
+        "xargs -I{} xwininfo -id {} 2>/dev/null | grep -q IsViewable");
+    if (status == -1)
+    {
+        // Couldn't even fork/exec a shell - assume Spotify mode, since
+        // wrongly toggling overlay flags is a lot less bad than
+        // wrongly staying silent if this is actually Spotify mode.
+        return true;
+    }
+    int exit_code = WEXITSTATUS(status);
+    return exit_code != 0;  // grep found nothing => not game mode => spotify
+}
+
 // Drains any pending joystick events (non-blocking), reconnecting or
 // noticing disconnection as needed, and if the brightness combo is
 // currently held, steps *brightness up or down.
@@ -267,6 +306,60 @@ static bool PollJoystickBrightness(int *brightness)
         (void)rc;  // fire-and-forget; toggle_display.sh logs its own errors
     }
     prev_toggle_held = toggle_held;
+
+    // Overlay toggles (Spotify mode only) - same edge-trigger pattern as
+    // the mode toggle above: fire once per press, not repeated on hold.
+    static bool prev_overlay_clock_held = false;
+    static bool prev_overlay_title_held = false;
+    static bool prev_overlay_artist_held = false;
+    static bool prev_overlay_progress_held = false;
+
+    bool clock_held = g_button_held[BTN_OVERLAY_CLOCK];
+    bool title_held = g_button_held[BTN_OVERLAY_TITLE];
+    bool artist_held = g_button_held[BTN_OVERLAY_ARTIST];
+    bool progress_held = g_button_held[BTN_OVERLAY_PROGRESS];
+
+    bool clock_pressed = clock_held && !prev_overlay_clock_held;
+    bool title_pressed = title_held && !prev_overlay_title_held;
+    bool artist_pressed = artist_held && !prev_overlay_artist_held;
+    bool progress_pressed = progress_held && !prev_overlay_progress_held;
+
+    if (clock_pressed || title_pressed || artist_pressed || progress_pressed)
+    {
+        // Only check mode once per poll pass, even if multiple face
+        // buttons somehow edge-triggered in the same frame.
+        if (IsSpotifyModeActive())
+        {
+            if (clock_pressed)
+            {
+                fprintf(stdout, "Toggling overlay: clock\n");
+                int rc = system(OVERLAY_TOGGLE_CLOCK_COMMAND);
+                (void)rc;
+            }
+            if (title_pressed)
+            {
+                fprintf(stdout, "Toggling overlay: title\n");
+                int rc = system(OVERLAY_TOGGLE_TITLE_COMMAND);
+                (void)rc;
+            }
+            if (artist_pressed)
+            {
+                fprintf(stdout, "Toggling overlay: artist\n");
+                int rc = system(OVERLAY_TOGGLE_ARTIST_COMMAND);
+                (void)rc;
+            }
+            if (progress_pressed)
+            {
+                fprintf(stdout, "Toggling overlay: progress\n");
+                int rc = system(OVERLAY_TOGGLE_PROGRESS_COMMAND);
+                (void)rc;
+            }
+        }
+    }
+    prev_overlay_clock_held = clock_held;
+    prev_overlay_title_held = title_held;
+    prev_overlay_artist_held = artist_held;
+    prev_overlay_progress_held = progress_held;
 
     if (modifier_held && (want_brighter || want_dimmer))
     {
