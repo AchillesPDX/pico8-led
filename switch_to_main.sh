@@ -13,9 +13,9 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 echo "== Checking git status before switching branches =="
-if [ -n "$(git status --porcelain)" ]; then
+if [ -n "$(git status --porcelain --ignore-submodules=dirty)" ]; then
     echo "You have uncommitted changes. Commit and push them to fancy first:"
-    git status --short
+    git status --short --ignore-submodules=dirty
     exit 1
 fi
 
