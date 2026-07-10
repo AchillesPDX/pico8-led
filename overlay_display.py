@@ -25,7 +25,6 @@ import json
 import os
 import time
 import signal
-import subprocess
 
 from Xlib import X, display
 from PIL import Image, ImageDraw, ImageFont
@@ -45,7 +44,12 @@ STATE_DIR = "/var/lib/pico8-led"
 TRACK_STATE_PATH = os.path.join(STATE_DIR, "track_state.json")
 OVERLAY_STATE_PATH = os.path.join(STATE_DIR, "overlay_state.json")
 
-REDRAW_INTERVAL = 1.0
+REDRAW_INTERVAL = 0.07     # ~14fps - fast enough for smooth scrolling text
+MODE_CHECK_INTERVAL = 1.0  # throttle the (now native, cheap) mode check anyway -
+                            # mode doesn't change fast enough to need per-frame checks
+
+SCROLL_SPEED = 25   # pixels/second
+SCROLL_GAP = 16      # blank pixels between the end of one loop and the start of the next
 
 _running = True
 
@@ -99,6 +103,29 @@ def make_window(disp):
     window.map()
     disp.sync()
     return window, depth
+
+
+def draw_scrolling_text(draw, x0, y, text, font, fill, max_width,
+                          stroke_width=0, stroke_fill=None):
+    """Draws text left-aligned at x0 if it fits in max_width. If it's
+    wider, scrolls it continuously instead of truncating - PIL clips
+    anything drawn outside the image's own bounds automatically, so no
+    manual clipping/cropping is needed even with negative x values."""
+    text_width = font.getlength(text)
+    available = max_width - (x0 * 2)  # symmetric margin on both sides
+
+    if text_width <= available:
+        draw.text((x0, y), text, font=font, fill=fill,
+                   stroke_width=stroke_width, stroke_fill=stroke_fill)
+        return
+
+    period = text_width + SCROLL_GAP
+    offset = (time.time() * SCROLL_SPEED) % period
+    x = x0 - offset
+    draw.text((x, y), text, font=font, fill=fill,
+               stroke_width=stroke_width, stroke_fill=stroke_fill)
+    draw.text((x + period, y), text, font=font, fill=fill,
+               stroke_width=stroke_width, stroke_fill=stroke_fill)
 
 
 def render_frame(width, height):
@@ -160,13 +187,8 @@ def render_frame(width, height):
             ty = bar_bottom - bar_h + 1
             for i, line in enumerate(lines):
                 f = font_small if i == 0 else font_tiny
-                # crude truncate rather than scroll, for a first pass
-                if f.getlength(line) > width - 6:
-                    while line and f.getlength(line + "...") > width - 6:
-                        line = line[:-1]
-                    line += "..."
-                draw.text((2, ty), line, font=f, fill=(TEXTCOLOR),
-                           stroke_width=1, stroke_fill=(STROKECOLOR))
+                draw_scrolling_text(draw, 2, ty, line, f, TEXTCOLOR, width,
+                                     stroke_width=1, stroke_fill=STROKECOLOR)
                 ty += 12
 
         if progress_enabled:
@@ -188,21 +210,23 @@ def blit(window, gc, img, width, height, depth):
     window.put_image(gc, 0, 0, width, height, X.ZPixmap, depth, 0, data)
 
 
-def pico8_is_visible():
-    """Same technique toggle_display.sh already uses - no shared state
-    file, just ask X directly whether the PICO-8 window is mapped."""
+def pico8_is_visible(disp):
+    """Queries the X window tree directly instead of shelling out to
+    xdotool/xwininfo. Same underlying signal as toggle_display.sh's
+    detect_mode() (is PICO-8's window mapped/viewable), but native -
+    spawning two subprocesses every MODE_CHECK_INTERVAL was blocking the
+    render loop long enough to cause a visible once-a-second stutter in
+    the scrolling text."""
     try:
-        win_id = subprocess.run(
-            ["xdotool", "search", "--name", PICO_WINDOW_TITLE],
-            capture_output=True, text=True, timeout=2,
-        ).stdout.strip().split("\n")[0]
-        if not win_id:
-            return False
-        result = subprocess.run(
-            ["xwininfo", "-id", win_id],
-            capture_output=True, text=True, timeout=2,
-        ).stdout
-        return "IsViewable" in result
+        root = disp.screen().root
+        for win in root.query_tree().children:
+            try:
+                name = win.get_wm_name()
+            except Exception:
+                continue
+            if name and PICO_WINDOW_TITLE in name:
+                return win.get_attributes().map_state == X.IsViewable
+        return False
     except Exception:
         # if we can't tell, err on the side of NOT covering gameplay
         return True
@@ -215,9 +239,16 @@ def main():
 
     width, height = GEOMETRY[0], GEOMETRY[1]
     currently_mapped = True
+    game_mode = pico8_is_visible(disp)
+    last_mode_check = time.time()
 
     while _running:
-        if pico8_is_visible():
+        now = time.time()
+        if now - last_mode_check >= MODE_CHECK_INTERVAL:
+            game_mode = pico8_is_visible(disp)
+            last_mode_check = now
+
+        if game_mode:
             if currently_mapped:
                 window.unmap()
                 disp.sync()
