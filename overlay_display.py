@@ -45,10 +45,11 @@ TRACK_STATE_PATH = os.path.join(STATE_DIR, "track_state.json")
 OVERLAY_STATE_PATH = os.path.join(STATE_DIR, "overlay_state.json")
 
 REDRAW_INTERVAL = 0.05     # ~14fps - fast enough for smooth scrolling text
+LOG_FRAME_STATS = False    # set True to log per-stage render timing to journal
 MODE_CHECK_INTERVAL = 1.0  # throttle the (now native, cheap) mode check anyway -
                             # mode doesn't change fast enough to need per-frame checks
 
-SCROLL_SPEED = 20   # pixels/second
+SCROLL_SPEED = 10   # pixels/second
 SCROLL_GAP = 16      # blank pixels between the end of one loop and the start of the next
 
 _running = True
@@ -249,11 +250,27 @@ def main():
     last_mode_check = time.time()
     font_small, font_tiny = load_fonts()
 
+    # Frame timing stats - accumulated and flushed periodically so we're
+    # not spamming the journal every ~50ms. Gated behind LOG_FRAME_STATS
+    # since the perf_counter() calls and list appends add a small amount
+    # of overhead of their own - leave off unless actively profiling.
+    STATS_INTERVAL = 5.0  # seconds between stats log lines
+    last_stats_flush = time.time()
+    frame_times = []  # total loop-body time (render+blit+sync), per frame
+    render_times = []
+    blit_sync_times = []
+    mode_check_times = []  # pico8_is_visible() cost, once per MODE_CHECK_INTERVAL
+
     while _running:
         loop_start = time.time()
 
         if loop_start - last_mode_check >= MODE_CHECK_INTERVAL:
-            game_mode = pico8_is_visible(disp)
+            if LOG_FRAME_STATS:
+                mc0 = time.perf_counter()
+                game_mode = pico8_is_visible(disp)
+                mode_check_times.append(time.perf_counter() - mc0)
+            else:
+                game_mode = pico8_is_visible(disp)
             last_mode_check = loop_start
 
         if game_mode:
@@ -266,15 +283,60 @@ def main():
                 window.map()
                 disp.sync()
                 currently_mapped = True
-            frame = render_frame(width, height, font_small, font_tiny)
-            blit(window, gc, frame, width, height, depth)
-            disp.sync()
+
+            if LOG_FRAME_STATS:
+                t0 = time.perf_counter()
+                frame = render_frame(width, height, font_small, font_tiny)
+                t1 = time.perf_counter()
+                blit(window, gc, frame, width, height, depth)
+                disp.sync()
+                t2 = time.perf_counter()
+
+                render_times.append(t1 - t0)
+                blit_sync_times.append(t2 - t1)
+                frame_times.append(t2 - t0)
+            else:
+                frame = render_frame(width, height, font_small, font_tiny)
+                blit(window, gc, frame, width, height, depth)
+                disp.sync()
 
         # Adaptive sleep: subtract however long this iteration's work took
         # so the real interval between draws stays close to REDRAW_INTERVAL
         # instead of drifting with render/blit/sync cost.
         elapsed = time.time() - loop_start
         time.sleep(max(0.0, REDRAW_INTERVAL - elapsed))
+
+        if LOG_FRAME_STATS and loop_start - last_stats_flush >= STATS_INTERVAL:
+            parts = [f"overlay_display: {STATS_INTERVAL:.0f}s window"]
+
+            if frame_times:
+                n = len(frame_times)
+                parts.append(
+                    f"{n} frames | render ms avg/min/max = "
+                    f"{1000*sum(render_times)/n:.2f}/{1000*min(render_times):.2f}/{1000*max(render_times):.2f} | "
+                    f"blit+sync ms avg/min/max = "
+                    f"{1000*sum(blit_sync_times)/n:.2f}/{1000*min(blit_sync_times):.2f}/{1000*max(blit_sync_times):.2f} | "
+                    f"total ms avg/min/max = "
+                    f"{1000*sum(frame_times)/n:.2f}/{1000*min(frame_times):.2f}/{1000*max(frame_times):.2f}"
+                )
+            else:
+                parts.append("no frames rendered (game_mode)")
+
+            if mode_check_times:
+                m = len(mode_check_times)
+                parts.append(
+                    f"mode_check ms avg/min/max = "
+                    f"{1000*sum(mode_check_times)/m:.2f}/{1000*min(mode_check_times):.2f}/{1000*max(mode_check_times):.2f} "
+                    f"({m} checks)"
+                )
+
+            print(" | ".join(parts), flush=True)
+
+            frame_times.clear()
+            render_times.clear()
+            blit_sync_times.clear()
+            mode_check_times.clear()
+            last_stats_flush = loop_start
 
     window.unmap()
     disp.sync()
