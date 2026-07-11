@@ -10,14 +10,14 @@ fi
 export SDL_AUDIODRIVER=alsa
 
 # --- Detect USB sound card and set it ---
-CARD=$(aplay -l 2>/dev/null | grep -m1 "USB" | awk -F'[:, ]+' '{print $2}')
-DEVICE=$(aplay -l 2>/dev/null | grep -A1 "card $CARD" | grep "device" | head -n1 |
-awk -F'[:, ]+' '{print $6}')
+LINE=$(aplay -l 2>/dev/null | grep -m1 "USB")
+CARD=$(echo "$LINE" | grep -oP 'card \K[0-9]+')
+DEVICE=$(echo "$LINE" | grep -oP 'device \K[0-9]+')
 
 if [[ -n "$CARD" && -n "$DEVICE" ]]; then
-  export ALSA_CARD="$CARD"
-  export ALSA_PCM_CARD="$CARD"
-  export ALSA_PCM_DEVICE="$DEVICE"
+    export ALSA_CARD="$CARD"
+    export ALSA_PCM_CARD="$CARD"
+    export ALSA_PCM_DEVICE="$DEVICE"
 fi
 
 # Debug info (optional: comment out later)
