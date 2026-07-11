@@ -1,4 +1,29 @@
 #!/bin/sh
+# --- Ensure XDG_RUNTIME_DIR is set (for sound backends that need it) ---
+if [ -z "$XDG_RUNTIME_DIR" ]; then
+  export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+  mkdir -p "$XDG_RUNTIME_DIR"
+  chmod 700 "$XDG_RUNTIME_DIR"
+fi
+
+# --- Force SDL to use ALSA ---
+export SDL_AUDIODRIVER=alsa
+
+# --- Detect USB sound card and set it ---
+CARD=$(aplay -l 2>/dev/null | grep -m1 "USB" | awk -F'[:, ]+' '{print $2}')
+DEVICE=$(aplay -l 2>/dev/null | grep -A1 "card $CARD" | grep "device" | head -n1 |
+awk -F'[:, ]+' '{print $6}')
+
+if [[ -n "$CARD" && -n "$DEVICE" ]]; then
+  export ALSA_CARD="$CARD"
+  export ALSA_PCM_CARD="$CARD"
+  export ALSA_PCM_DEVICE="$DEVICE"
+fi
+
+# Debug info (optional: comment out later)
+echo "Sound setup: ALSA card=$CARD, device=$DEVICE,
+XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
+
 export DISPLAY=:3.0
 
 Xvfb $DISPLAY -screen 0 800x600x24 &

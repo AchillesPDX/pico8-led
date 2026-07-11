@@ -44,11 +44,11 @@ STATE_DIR = "/var/lib/pico8-led"
 TRACK_STATE_PATH = os.path.join(STATE_DIR, "track_state.json")
 OVERLAY_STATE_PATH = os.path.join(STATE_DIR, "overlay_state.json")
 
-REDRAW_INTERVAL = 0.1     # ~14fps - fast enough for smooth scrolling text
+REDRAW_INTERVAL = 0.05     # ~14fps - fast enough for smooth scrolling text
 MODE_CHECK_INTERVAL = 1.0  # throttle the (now native, cheap) mode check anyway -
                             # mode doesn't change fast enough to need per-frame checks
 
-SCROLL_SPEED = 10   # pixels/second
+SCROLL_SPEED = 20   # pixels/second
 SCROLL_GAP = 16      # blank pixels between the end of one loop and the start of the next
 
 _running = True
