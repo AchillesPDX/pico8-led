@@ -128,7 +128,23 @@ def draw_scrolling_text(draw, x0, y, text, font, fill, max_width,
                stroke_width=stroke_width, stroke_fill=stroke_fill)
 
 
-def render_frame(width, height):
+def load_fonts():
+    """Loads fonts from disk once. Called at startup, not per-frame -
+    ImageFont.truetype() is variable-cost disk I/O, and doing it ~14x/sec
+    inside the render loop was a source of frame-to-frame jitter."""
+    try:
+        font_small = ImageFont.truetype(
+            os.path.join(FONTS_DIR, "04b_25.ttf"), 12)
+        font_tiny = ImageFont.truetype(
+            os.path.join(FONTS_DIR, "04b_03.ttf"), 8)
+    except Exception as e:
+        print(f"overlay_display: could not load custom font, falling back to default: {e}")
+        font_small = ImageFont.load_default()
+        font_tiny = font_small
+    return font_small, font_tiny
+
+
+def render_frame(width, height, font_small, font_tiny):
     """Build the RGBA frame to blit - translucent bars behind text."""
     track = load_json(TRACK_STATE_PATH, {
         "is_playing": False, "title": None, "artist": None,
@@ -140,16 +156,6 @@ def render_frame(width, height):
 
     img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-
-    try:
-        font_small = ImageFont.truetype(
-            os.path.join(FONTS_DIR, "04b_25.ttf"), 12)
-        font_tiny = ImageFont.truetype(
-            os.path.join(FONTS_DIR, "04b_03.ttf"), 8)
-    except Exception as e:
-        print(f"overlay_display: could not load custom font, falling back to default: {e}")
-        font_small = ImageFont.load_default()
-        font_tiny = font_small
 
     BAR_BG = (0, 0, 0, 140)  # translucent black backing, alpha 140/255
     STROKECOLOR = (0, 0, 0, 140) # translucent black stroke, alpha 140/255
@@ -241,12 +247,14 @@ def main():
     currently_mapped = True
     game_mode = pico8_is_visible(disp)
     last_mode_check = time.time()
+    font_small, font_tiny = load_fonts()
 
     while _running:
-        now = time.time()
-        if now - last_mode_check >= MODE_CHECK_INTERVAL:
+        loop_start = time.time()
+
+        if loop_start - last_mode_check >= MODE_CHECK_INTERVAL:
             game_mode = pico8_is_visible(disp)
-            last_mode_check = now
+            last_mode_check = loop_start
 
         if game_mode:
             if currently_mapped:
@@ -258,10 +266,15 @@ def main():
                 window.map()
                 disp.sync()
                 currently_mapped = True
-            frame = render_frame(width, height)
+            frame = render_frame(width, height, font_small, font_tiny)
             blit(window, gc, frame, width, height, depth)
             disp.sync()
-        time.sleep(REDRAW_INTERVAL)
+
+        # Adaptive sleep: subtract however long this iteration's work took
+        # so the real interval between draws stays close to REDRAW_INTERVAL
+        # instead of drifting with render/blit/sync cost.
+        elapsed = time.time() - loop_start
+        time.sleep(max(0.0, REDRAW_INTERVAL - elapsed))
 
     window.unmap()
     disp.sync()
