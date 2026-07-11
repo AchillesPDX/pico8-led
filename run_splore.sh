@@ -14,7 +14,7 @@ LINE=$(aplay -l 2>/dev/null | grep -m1 "USB")
 CARD=$(echo "$LINE" | grep -oP 'card \K[0-9]+')
 DEVICE=$(echo "$LINE" | grep -oP 'device \K[0-9]+')
 
-if [[ -n "$CARD" && -n "$DEVICE" ]]; then
+if [ -n "$CARD" } && [ -n "$DEVICE" ]; then
     export ALSA_CARD="$CARD"
     export ALSA_PCM_CARD="$CARD"
     export ALSA_PCM_DEVICE="$DEVICE"
