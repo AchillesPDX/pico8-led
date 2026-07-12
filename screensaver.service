@@ -1,0 +1,19 @@
+[Unit]
+Description=Screensaver album-art slideshow (Spotify idle sub-state)
+# Ordered after the fancy poller because screensaver.py reads the
+# track_state.json that now_playing_fancy.py writes, and shares
+# nowplaying.png with it. After= only sets start ORDER, not a hard
+# dependency - if the poller isn't up yet, screensaver.py just reads a
+# missing track_state.json as "not playing" and waits, which is benign.
+After=now-playing-fancy.service
+Wants=now-playing-fancy.service
+
+[Service]
+Type=simple
+User=jared
+ExecStart=/usr/bin/python3 /home/jared/pico8-led/screensaver.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
