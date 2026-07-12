@@ -137,7 +137,7 @@ def load_fonts():
         font_small = ImageFont.truetype(
             os.path.join(FONTS_DIR, "04b_25.ttf"), 12)
         font_tiny = ImageFont.truetype(
-            os.path.join(FONTS_DIR, "04b_03.ttf"), 8)
+            os.path.join(FONTS_DIR, "pixuf.ttf"), 8)
     except Exception as e:
         print(f"overlay_display: could not load custom font, falling back to default: {e}")
         font_small = ImageFont.load_default()
