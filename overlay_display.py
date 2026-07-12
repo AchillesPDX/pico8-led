@@ -43,6 +43,7 @@ FONTS_DIR = os.path.join(SCRIPT_DIR, "fonts")
 STATE_DIR = "/var/lib/pico8-led"
 TRACK_STATE_PATH = os.path.join(STATE_DIR, "track_state.json")
 OVERLAY_STATE_PATH = os.path.join(STATE_DIR, "overlay_state.json")
+SCREENSAVER_STATE_PATH = os.path.join(STATE_DIR, "screensaver_state.json")
 
 REDRAW_INTERVAL = 0.05     # ~14fps - fast enough for smooth scrolling text
 LOG_FRAME_STATS = False    # set True to log per-stage render timing to journal
@@ -154,6 +155,7 @@ def render_frame(width, height, font_small, font_tiny):
     overlay = load_json(OVERLAY_STATE_PATH, {
         "clock": True, "title": True, "artist": True, "progress": True,
     })
+    screensaver = load_json(SCREENSAVER_STATE_PATH, {"active": False})
 
     img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
@@ -162,12 +164,42 @@ def render_frame(width, height, font_small, font_tiny):
     STROKECOLOR = (0, 0, 0, 140) # translucent black stroke, alpha 140/255
     TEXTCOLOR = (255, 255, 255, 255) # Text color
 
+    # Screensaver takes precedence over the live-track overlay, but only
+    # when the track really isn't playing. is_playing wins any tie so a
+    # just-resumed track can never be hidden behind a stale screensaver
+    # flag during the sub-second handoff back to now_playing_fancy.py.
+    screensaver_active = screensaver.get("active") and not track.get("is_playing")
+
     if overlay.get("clock"):
         text = time.strftime("%I:%M").lstrip("0").lower()
         draw.text((width - 2, 0), text, font=font_small, fill=(TEXTCOLOR),
                    stroke_width=1, stroke_fill=(STROKECOLOR), anchor="ra")
 
-    if track.get("is_playing"):
+    if screensaver_active:
+        # Album / artist / year text along the bottom, same scrolling
+        # treatment and positioning as the live title/artist, but no
+        # progress bar (there's no progress to show on a static image).
+        # Respects the same title/artist toggles so the user's overlay
+        # prefs carry over into screensaver mode.
+        lines = []
+        if overlay.get("title") and screensaver.get("album"):
+            year = screensaver.get("year")
+            album = screensaver["album"]
+            lines.append(f"{album} ({year})" if year else album)
+        if overlay.get("artist") and screensaver.get("artist"):
+            lines.append(screensaver["artist"])
+
+        if lines:
+            ty = height - (12 * len(lines) + 2) + 1
+            if len(lines) > 1:
+                ty += 5
+            for i, line in enumerate(lines):
+                f = font_small if i == 0 else font_tiny
+                draw_scrolling_text(draw, 2, ty, line, f, TEXTCOLOR, width,
+                                     stroke_width=1, stroke_fill=STROKECOLOR)
+                ty += 12
+
+    elif track.get("is_playing"):
         # extrapolate progress locally so it ticks smoothly between polls
         elapsed_since_poll = time.time() - track.get("polled_at", time.time())
         progress_ms = track.get("progress_ms", 0) + elapsed_since_poll * 1000
