@@ -118,6 +118,19 @@ def save_album_art(url):
     os.replace(tmp_path, ART_PATH)
 
 
+def clear_art():
+    """Overwrites the displayed art with solid black. Same atomic-write
+    pattern as save_album_art() so feh never catches a half-written
+    file mid-reload. Called once on the transition into a stopped/
+    paused state, not every poll - same one-write-per-transition idea
+    as _art_cleared below, to avoid needlessly rewriting a file that
+    hasn't changed every 5s poll cycle."""
+    img = Image.new("RGB", (IMAGE_SIZE, IMAGE_SIZE), (0, 0, 0))
+    tmp_path = ART_PATH + ".tmp"
+    img.save(tmp_path, format="PNG")
+    os.replace(tmp_path, ART_PATH)
+
+
 def write_state(is_playing, title=None, artist=None, progress_ms=0, duration_ms=0):
     atomic_write_json(STATE_PATH, {
         "is_playing": is_playing,
@@ -130,10 +143,16 @@ def write_state(is_playing, title=None, artist=None, progress_ms=0, duration_ms=
 
 
 _cfg = None  # cached across polls, refreshed in place on 401
+# Starts False, not True: unlike now_playing.py's save_placeholder() at
+# startup, this script never writes a placeholder, so on a fresh start
+# nowplaying.png could still be holding stale art from whatever was
+# last playing before a restart. Starting False means the first
+# not-playing poll clears it rather than assuming it's already black.
+_art_cleared = False
 
 
 def poll_once():
-    global _last_track_id, _cfg
+    global _last_track_id, _cfg, _art_cleared
 
     if _cfg is None:
         _cfg = load_config()
@@ -151,9 +170,14 @@ def poll_once():
     is_playing = bool(data) and bool(item) and data.get("is_playing", False)
 
     if not is_playing:
+        if not _art_cleared:
+            clear_art()
+            _art_cleared = True
         write_state(is_playing=False)
         _last_track_id = None
         return
+
+    _art_cleared = False
 
     track_id = item.get("id")
     if track_id != _last_track_id:

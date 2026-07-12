@@ -28,7 +28,7 @@ for i in $(seq 1 50); do
   [ -f ./nowplaying.png ] && break
   sleep 0.2
 done
-feh --title nowplaying --geometry 128x128+128+128 --borderless --reload 3 ./nowplaying.png > /tmp/feh.log 2>&1 &
+feh --title nowplaying --geometry 128x128+128+128 --borderless --reload 0.5 ./nowplaying.png > /tmp/feh.log 2>&1 &
 
 # Wait for the spotify window to actually exist before mapping it.
 # There's no PICO-8 window to wait for anymore at boot - it's no longer
