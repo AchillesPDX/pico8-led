@@ -9,6 +9,7 @@ pico-8_*.zip
 
 # generated album art / render state - not source
 nowplaying.png
+screensaver.png
 nowplaying_fancy.png
 nowplaying*.png.tmp
 

@@ -29,10 +29,20 @@ from PIL import Image
 
 CONFIG_PATH = os.path.expanduser("~/.config/pico8-led/spotify.json")
 ART_PATH = os.path.expanduser("~/pico8-led/nowplaying.png")
+# Source frame produced by screensaver.py. This script is the ONLY writer
+# of ART_PATH (nowplaying.png); during idle it publishes this file onto
+# ART_PATH. screensaver.py never writes ART_PATH, which is what makes the
+# resume clobber impossible.
+SCREENSAVER_ART_PATH = os.path.expanduser("~/pico8-led/screensaver.png")
 STATE_DIR = "/var/lib/pico8-led"
 STATE_PATH = os.path.join(STATE_DIR, "track_state.json")
+SCREENSAVER_STATE_PATH = os.path.join(STATE_DIR, "screensaver_state.json")
 IMAGE_SIZE = 128
-POLL_INTERVAL_SEC = 5
+POLL_INTERVAL_SEC = 5      # how often we hit the Spotify API
+PUBLISH_INTERVAL_SEC = 0.5 # how often we refresh the displayed image while
+                            # idle (publishing screensaver frames / black) -
+                            # decoupled from the API poll so slideshow frames
+                            # appear promptly without polling Spotify faster
 
 TOKEN_URL = "https://accounts.spotify.com/api/token"
 NOW_PLAYING_URL = "https://api.spotify.com/v1/me/player/currently-playing"
@@ -40,6 +50,12 @@ NOW_PLAYING_URL = "https://api.spotify.com/v1/me/player/currently-playing"
 os.makedirs(STATE_DIR, exist_ok=True)
 
 _last_track_id = None
+_is_playing = False          # last known playback state, shared with the
+                              # idle-publish loop in __main__
+_black_published = False      # have we already blacked the panel this idle spell?
+_published_ss_mtime = None    # mtime of the screensaver.png we last published,
+                              # so we only re-copy when the frame actually changes
+_running = True
 
 
 def load_config():
@@ -119,16 +135,66 @@ def save_album_art(url):
 
 
 def clear_art():
-    """Overwrites the displayed art with solid black. Same atomic-write
-    pattern as save_album_art() so feh never catches a half-written
-    file mid-reload. Called once on the transition into a stopped/
-    paused state, not every poll - same one-write-per-transition idea
-    as _art_cleared below, to avoid needlessly rewriting a file that
-    hasn't changed every 5s poll cycle."""
+    """Overwrites the displayed art with solid black via the same
+    atomic-write pattern as save_album_art(), so feh never catches a
+    half-written file mid-reload. Used by publish_idle_frame() when idle
+    with no active screensaver (e.g. during the debounce window, or when
+    no cached art exists)."""
     img = Image.new("RGB", (IMAGE_SIZE, IMAGE_SIZE), (0, 0, 0))
     tmp_path = ART_PATH + ".tmp"
     img.save(tmp_path, format="PNG")
     os.replace(tmp_path, ART_PATH)
+
+
+def load_json(path, default):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+
+def publish_screensaver_frame():
+    """Copy screensaver.png onto the displayed nowplaying.png. Raw byte
+    copy (the source is already a 128x128 PNG) via tmp-then-rename. This
+    is the ONLY path that puts screensaver art on screen - screensaver.py
+    itself never writes nowplaying.png."""
+    tmp_path = ART_PATH + ".tmp"
+    with open(SCREENSAVER_ART_PATH, "rb") as fsrc, open(tmp_path, "wb") as fdst:
+        fdst.write(fsrc.read())
+    os.replace(tmp_path, ART_PATH)
+
+
+def publish_idle_frame():
+    """Called repeatedly (every PUBLISH_INTERVAL_SEC) while playback is
+    stopped. Decides what the panel shows during idle:
+
+      - screensaver active + screensaver.png present -> publish that frame,
+        but only when it actually changed (mtime differs from the last one
+        we published) so we're not rewriting nowplaying.png every 0.5s.
+      - otherwise (debounce window, screensaver off, or no cached art) ->
+        black, written once per idle spell.
+
+    Because only this process ever writes nowplaying.png, a resume can
+    never be clobbered: the instant poll_once() sees playback, it writes
+    the live cover and _is_playing flips, so this stops being called."""
+    global _black_published, _published_ss_mtime
+
+    ss = load_json(SCREENSAVER_STATE_PATH, {"active": False})
+    if ss.get("active") and os.path.exists(SCREENSAVER_ART_PATH):
+        try:
+            mtime = os.path.getmtime(SCREENSAVER_ART_PATH)
+        except OSError:
+            return
+        if mtime != _published_ss_mtime:
+            publish_screensaver_frame()
+            _published_ss_mtime = mtime
+            _black_published = False
+    else:
+        if not _black_published:
+            clear_art()
+            _black_published = True
+            _published_ss_mtime = None
 
 
 def write_state(is_playing, title=None, artist=None, progress_ms=0, duration_ms=0):
@@ -143,16 +209,11 @@ def write_state(is_playing, title=None, artist=None, progress_ms=0, duration_ms=
 
 
 _cfg = None  # cached across polls, refreshed in place on 401
-# Starts False, not True: unlike now_playing.py's save_placeholder() at
-# startup, this script never writes a placeholder, so on a fresh start
-# nowplaying.png could still be holding stale art from whatever was
-# last playing before a restart. Starting False means the first
-# not-playing poll clears it rather than assuming it's already black.
-_art_cleared = False
 
 
 def poll_once():
-    global _last_track_id, _cfg, _art_cleared
+    global _last_track_id, _cfg, _is_playing
+    global _black_published, _published_ss_mtime
 
     if _cfg is None:
         _cfg = load_config()
@@ -170,14 +231,23 @@ def poll_once():
     is_playing = bool(data) and bool(item) and data.get("is_playing", False)
 
     if not is_playing:
-        if not _art_cleared:
-            clear_art()
-            _art_cleared = True
+        # Don't touch the image here - the idle-publish loop in __main__
+        # owns nowplaying.png while stopped (screensaver frame or black).
+        # Reset _last_track_id so that when playback resumes we always
+        # re-fetch and write the live cover (the idle loop will have
+        # overwritten nowplaying.png with screensaver art in the meantime).
         write_state(is_playing=False)
         _last_track_id = None
+        _is_playing = False
         return
 
-    _art_cleared = False
+    # Transitioning into (or continuing) playback. If we were idle, reset
+    # the publisher's bookkeeping so the next idle spell re-publishes
+    # cleanly rather than trusting stale flags.
+    if not _is_playing:
+        _black_published = False
+        _published_ss_mtime = None
+    _is_playing = True
 
     track_id = item.get("id")
     if track_id != _last_track_id:
@@ -195,13 +265,35 @@ def poll_once():
     )
 
 
+def _sigterm(_sig, _frame):
+    global _running
+    _running = False
+
+
 if __name__ == "__main__":
+    import signal
+    signal.signal(signal.SIGTERM, _sigterm)
+    signal.signal(signal.SIGINT, _sigterm)
+
     _cfg = refresh_access_token(load_config())
-    while True:
+    while _running:
+        cycle_start = time.time()
         try:
             poll_once()
         except requests.RequestException as e:
             print(f"now_playing_fancy: request error: {e}", file=sys.stderr)
         except Exception as e:
             print(f"now_playing_fancy: unexpected error: {e}", file=sys.stderr)
-        time.sleep(POLL_INTERVAL_SEC)
+
+        # Between Spotify polls, keep the displayed image fresh while idle.
+        # This is the ONLY place nowplaying.png is written during idle, and
+        # it runs on a fast, cheap cadence (no API calls) so screensaver
+        # frames appear within ~PUBLISH_INTERVAL_SEC of screensaver.py
+        # producing them, without polling Spotify any faster.
+        while _running and (time.time() - cycle_start) < POLL_INTERVAL_SEC:
+            if not _is_playing:
+                try:
+                    publish_idle_frame()
+                except Exception as e:
+                    print(f"now_playing_fancy: idle publish error: {e}", file=sys.stderr)
+            time.sleep(PUBLISH_INTERVAL_SEC)

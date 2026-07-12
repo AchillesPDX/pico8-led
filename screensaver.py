@@ -3,24 +3,22 @@
 screensaver.py
 
 Idle-time album-art slideshow. When Spotify has been not-playing for
-longer than SCREENSAVER_DEBOUNCE_SEC, this daemon takes over the same
-nowplaying.png that now_playing_fancy.py normally drives, and cycles
-through the curated art cache one album every SCREENSAVER_INTERVAL_SEC.
-When playback resumes, it immediately stands down and hands the file
-back.
+longer than SCREENSAVER_DEBOUNCE_SEC, this daemon cycles through the
+curated art cache one album every SCREENSAVER_INTERVAL_SEC, and publishes
+each frame to its OWN source file (screensaver.png) plus a state file.
+When playback resumes it stops advancing.
 
-WHY THIS IS SAFE TO SHARE nowplaying.png WITH now_playing_fancy.py:
-  now_playing_fancy.py only writes nowplaying.png on a *transition* -
-  it saves album art once when a new track starts, and calls clear_art()
-  ONCE when playback stops (gated by its _art_cleared flag). While idle,
-  it leaves the file completely alone. That gives screensaver.py a clear
-  window to own the file. The single point of contention is the instant
-  playback resumes: to avoid clobbering real album art with a slideshow
-  frame, screensaver.py re-reads track_state.json immediately before
-  EVERY write and bails the moment is_playing is true. Worst case is one
-  already-written slideshow frame lingering until feh's next ~0.5s
-  reload, after which now_playing_fancy's fresh art shows - a harmless
-  sub-second overlap, not a persistent fight.
+DISPLAY OWNERSHIP - why there's no resume clobber anymore:
+  This daemon does NOT write the displayed file (nowplaying.png). It only
+  writes screensaver.png (a source image) and screensaver_state.json.
+  now_playing_fancy.py is the SOLE writer of nowplaying.png: when playing
+  it writes the live cover, and when idle it publishes this screensaver.png
+  onto nowplaying.png itself. Because exactly one process holds the pen
+  for the displayed file, a slideshow frame can never overwrite live album
+  art on resume - the earlier bug where screensaver art stuck on screen
+  next to live metadata (until the track changed) is impossible by
+  construction. The is_playing gate below is now only about not advancing
+  the rotation during playback, not about avoiding a write race.
 
 READS:
   /var/lib/pico8-led/track_state.json  (written by now_playing_fancy.py)
@@ -28,7 +26,8 @@ READS:
   <script_dir>/screensaver_art/*.png   (built by either fetch script)
 
 WRITES:
-  ~/pico8-led/nowplaying.png              (only while active + idle)
+  ~/pico8-led/screensaver.png             (source frame; now_playing_fancy
+                                           publishes it to nowplaying.png)
   /var/lib/pico8-led/screensaver_state.json (so overlay_display.py can
                                              show a screensaver-specific
                                              overlay: clock + album text,
@@ -61,7 +60,13 @@ IMAGE_SIZE = 128
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ALBUMS_PATH = os.path.join(SCRIPT_DIR, "curated_albums.json")
 ART_DIR = os.path.join(SCRIPT_DIR, "screensaver_art")
-ART_PATH = os.path.expanduser("~/pico8-led/nowplaying.png")
+# We write the current slideshow frame to OUR OWN source file, never to
+# the displayed nowplaying.png. now_playing_fancy.py is the sole writer
+# of nowplaying.png; during idle it publishes this screensaver.png onto
+# it. That single-writer split is what makes the resume clobber
+# impossible - screensaver.py physically cannot overwrite live album art
+# anymore, because it doesn't hold the pen for the displayed file.
+ART_PATH = os.path.expanduser("~/pico8-led/screensaver.png")
 
 STATE_DIR = "/var/lib/pico8-led"
 TRACK_STATE_PATH = os.path.join(STATE_DIR, "track_state.json")
@@ -192,10 +197,12 @@ def main():
         playing = is_spotify_playing()
 
         if playing:
-            # Resume path. Stand down immediately - do NOT write art here;
-            # now_playing_fancy.py owns nowplaying.png again the moment a
-            # track is playing, and it'll write the real cover on its next
-            # poll (or already has).
+            # Resume path. Stop advancing and clear the active flag so the
+            # overlay drops the screensaver text. We don't touch any image
+            # file here - now_playing_fancy.py owns nowplaying.png and will
+            # write the live cover on its poll. (No TOCTOU recheck needed
+            # anymore: we never write the displayed file, so there's nothing
+            # to race against on resume.)
             if active:
                 active = False
                 write_screensaver_state(False)
@@ -214,16 +221,6 @@ def main():
             time_to_advance = (now - last_advance) >= SCREENSAVER_INTERVAL_SEC
 
             if first_frame or time_to_advance:
-                # Re-check playback RIGHT before writing to close the race
-                # with a resume that happened during this poll's own work.
-                if is_spotify_playing():
-                    if active:
-                        active = False
-                        write_screensaver_state(False)
-                    not_playing_since = None
-                    time.sleep(POLL_INTERVAL_SEC)
-                    continue
-
                 entry, art_path = playlist[idx]
                 try:
                     atomic_copy_png(art_path, ART_PATH)
